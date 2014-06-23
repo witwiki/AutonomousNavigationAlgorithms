@@ -12,6 +12,7 @@
 #   (3) Finally, self.position is updated which is what's plotted
 #
 #################################################################
+
 import numpy as np
 from plot import plot_trajectory
 from math import cos, sin
