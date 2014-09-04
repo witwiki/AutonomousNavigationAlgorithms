@@ -1,11 +1,21 @@
 import math
 import numpy as np
 from plot import plot_trajectory, plot_point, plot_covariance_2d
-        
+
+
 class UserCode:
     def __init__(self):        
+        # Initializations for Position Control
+
+        self.Kpx = 5
+        self.Kdx = 5
+        self.lastX = 0
+
+        self.Kpy = 5
+        self.Kdy = 5
+        self.lastY = 0
+
         #TODO: Play with the noise matrices
-        
         #process noise
         pos_noise_std = 0.005
         yaw_noise_std = 0.005
@@ -24,11 +34,41 @@ class UserCode:
             [0,0,z_yaw_noise_std*z_yaw_noise_std]
         ])
         
-        # state vector [x, y, yaw] in world coordinates
-        self.x = np.zeros((3,1)) 
-        
+        # state vector [x, y] in world coordinates 
+        self.x = np.zeros((3,1))            # This is equivalent to self.position = np.zeros((3,1)) 
+ 
         # 3x3 state covariance matrix
         self.sigma = 0.01 * np.identity(3) 
+
+
+    def get_markers(self):
+        '''
+        place up to 30 markers in the world
+        '''
+        markers = [
+            [0, 0], # marker at world position x = 0, y = 0
+            [1.25, 0.5],  # marker at world position x = 1.25, y = 0.5
+            [3, 0.5],
+            [4.5, 0.5],
+            [3.5, 2],
+            [1.25, 3.5],
+            [3, 3.5],
+            [4.5, 3.5],
+            [4, 5.5],
+            [5.5, 5.5],
+            [7, 5.5],
+            [4, 7],
+            [4, 8.5],
+            [5.5, 8.5],
+            [7, 8.5],
+            [9.5, 9.5],
+            [9.5, 11],
+            [9.5, 12.5],
+            [8, 11],
+            [6.5, 11]            
+        ]
+        
+        return markers
         
     def rotation(self, yaw):
         '''
@@ -139,7 +179,6 @@ class UserCode:
         :return - 3x3 Jacobian matrix of the predictMeasurement(...) function
         '''
         
-        # TODO: implement computation of H
         s_yaw = math.sin(x[2])
         c_yaw = math.cos(x[2])
         
@@ -155,6 +194,36 @@ class UserCode:
                      
         return H
     
+
+    def compute_control_command(self, t, dt, measured, desired):
+        #self.plot(state.position, state_desired.position)
+        
+        u = np.zeros((2,1))
+
+        x_measured = measured[0]
+        y_measured = measured[1]
+        x_desired = desired[0]
+        y_desired = desired[1]
+
+        # For x coordinate
+        velX = (x_measured - self.lastX) / dt
+        uX = self.Kpx * (x_desired - x_measured) + self.Kdx * (0 - velX)
+        
+        self.lastX = x_measured;
+
+        # For y coordinate
+        velY = (y_measured - self.lastY) / dt
+        uY = self.Kpy * (y_desired - y_measured) + self.Kdy * (0 - velY)
+        
+        self.lastY = y_measured;
+
+        # Unify both coordinates
+        u = np.array([[uX],
+                      [uY]])
+
+        return u
+
+
     def state_callback(self, t, dt, linear_velocity, yaw_velocity):
         '''
         called when a new odometry measurement arrives approx. 200Hz
@@ -163,13 +232,33 @@ class UserCode:
         :param dt - time difference this last invocation
         :param linear_velocity - x and y velocity in local quadrotor coordinate frame (independet of roll and pitch)
         :param yaw_velocity - velocity around quadrotor z axis (independet of roll and pitch)
+
+        :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
         '''
-        self.x = self.predictState(dt, self.x, linear_velocity, yaw_velocity)
-        
+
+        linear_velocity = np.zeros((2,1))
+        yaw_velocity = 0.0
+
+
+        #   ----------> Calculation of the EKF Prediction Step (200Hz) [Slide 10 L6.3]        
+        ##  State Prediction Jacobian [F] here is in Slide 10 L6.3 represented as G
         F = self.calculatePredictStateJacobian(dt, self.x, linear_velocity, yaw_velocity)
+
+        ##  The mean is calculated for the prediction step
+        self.x = self.predictState(dt, self.x, linear_velocity, yaw_velocity)
+
+        ##  The covariance is next and calculated for the prediction step using the Jacobian and process noise [Q]        
         self.sigma = self.predictCovariance(self.sigma, F, self.Q);
         
         self.visualizeState()
+
+
+        # compute_control_command function under here
+
+        linear_velocity = self.compute_control_command(t, dt, self.x, self.get_markers())
+
+                
+        return linear_velocity, yaw_velocity
     
     def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
         '''
@@ -181,13 +270,22 @@ class UserCode:
         :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
         :param marker_yaw_relative - orientation of the marker relative to the quadrotor
         '''
+
+        # New Sensor/Camera reading arrives        
         z = np.array([[marker_position_relative[0], marker_position_relative[1], marker_yaw_relative]]).T
         z_predicted = self.predictMeasurement(self.x, marker_position_world, marker_yaw_world)
                 
+        #   ----------> Calculation of the EKF Correction Step (13Hz) [Slide 10 L6.3]
+        ##  The Measurement Prediction Jacobian [H] is calculated so they can be applied to the correction step using global marker position coordinates and heading
         H = self.calculatePredictMeasurementJacobian(self.x, marker_position_world, marker_yaw_world)
+
+        #   The Kalman gain is calculate using the Jacobian and measurement (from sensor) noise [R]
         K = self.calculateKalmanGain(self.sigma, H, self.R)
-        
+
+        ##  The mean is calculated for the correction step using Kalman gain [K], observations [z] and predicted observations [z_predicted]        
         self.x = self.correctState(K, self.x, z, z_predicted)
+
+        ##  The covariance is next and calculated for the correction step using the Jacobian [H] and Kalman gain [K]
         self.sigma = self.correctCovariance(self.sigma, K, H)
         
         self.visualizeState()

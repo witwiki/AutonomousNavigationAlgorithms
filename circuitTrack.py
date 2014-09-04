@@ -25,6 +25,7 @@ from plot import plot, plot_trajectory, plot_covariance_2d
 class UserCode:
     def __init__(self):        
         
+# -----> Initializations for EKF        
         #process noise
         pos_noise_std = 0.005
         yaw_noise_std = 0.005
@@ -42,23 +43,20 @@ class UserCode:
             [0,z_pos_noise_std*z_pos_noise_std,0],
             [0,0,z_yaw_noise_std*z_yaw_noise_std]
         ])
-    
-        # xy control gains
-        Kp_xy = 0.5 # xy proportional
-        Kd_xy = 0.0 # xy differential
-        
-        # height control gains
-        Kp_z  = 0.5 # z proportional
-        Kd_z  = 0.0 # z differential
-        
-        self.Kp = np.array([[Kp_xy, Kp_xy, Kp_z]]).T
-        self.Kd = np.array([[Kd_xy, Kd_xy, Kd_z]]).T
-        
+    # -----> Initializations of State Vector [Estimation]
         # state vector [x, y, yaw] in world coordinates
         self.x = np.zeros((3,1)) 
-        
+
+    # -----> Initializations of Covariance Matrix        
         # 3x3 state covariance matrix
         self.sigma = 0.01 * np.identity(3) 
+
+# -----> Initializations for PD Control    
+        #: Tune gains
+        self.Kp = 100
+        self.Kd = 20
+        self.prevErr = 0.0
+
 
     def get_markers(self):
         '''
@@ -113,13 +111,17 @@ class UserCode:
             y += 2 * math.pi
         return y
 
+    def visualizeState(self):
+        # visualize position state
+        plot_trajectory("kalman", self.x[0:2])
+        plot_covariance_2d("kalman", self.sigma[0:2,0:2])
 
 
 ##  ---------------------------------------------------------------
 ### ---------------------------------------------------------------
 ####    PD CONTROLLER
-
-    def compute_control_command(self, state, state_desired):
+'''
+    def compute_control_command(self, xMeasured, xDesired):
         '''
         :param t: time since simulation start
         :param dt: time since last call to measurement_callback
@@ -128,28 +130,31 @@ class UserCode:
         :return - xyz velocity control signal represented as 3x1 numpy array
         '''
         # plot current state and desired setpoint
-        self.plot(state.position, state_desired.position)
+        #self.plot(state.position, state_desired.position)
         
-        #: implement PID controller computing u from state and state_desired
-        u = np.zeros((3,1))
-        
-        # Calculating the error in response for proportional and derivative controls
-        presErr = state_desired.position - state.position
-        kdErr = state_desired.velocity - state.velocity
-        #kiErr = (state_desired.position - state.position) * dt
-        
+
+        #: implement PD controller
+        u = np.zeros((2,1))
+
+        # Calculating errors (x_desired - x_measured)
+        #presErr = get_markers[0] - (linear_velocity * dt)
+        xMeasured = (self.linear_velocity * dt)
+        xDesired = self.get_markers
+        presErr = xDesired - xMeasured
+        kdErr = (presErr - self.prevErr)/dt
+
         # Calculating the Proportional and Derivative Controls
         p = self.Kp * presErr
-        #i = self.Ki * kiErr
         d = self.Kd * kdErr
-        
+
         # Calculating the full PD controller
-        u = p + d #+ i
+        u = p + d
         
         # Updating the error for each time step
-        self.prevErr = presErr      
+        self.prevErr = presErr          
         
         return u
+'''
 
 ####    PD CONTROLLER END
 ### ---------------------------------------------------------------
@@ -291,6 +296,9 @@ class UserCode:
         :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
         '''
 
+        linear_velocity = np.zeros((2,1))
+        yaw_velocity = 0s
+
         #   ----------> Calculation of the EKF Prediction Step (200Hz) [Slide 10 L6.3]        
         ##  State Prediction Jacobian [F] here is in Slide 10 L6.3 represented as G
         F = self.calculatePredictStateJacobian(dt, self.x, linear_velocity, yaw_velocity)
@@ -299,12 +307,35 @@ class UserCode:
         ##  The covariance is next and calculated for the prediction step using the Jacobian and process noise [Q]
         self.sigma = self.predictCovariance(self.sigma, F, self.Q);
 
-        #   ----------> Calculation of the Position Controller [PID/PD]
-        compute_control_command(self.x, state_desired)
         
+        #   ----------> Calculation of the Position Controller [PID/PD]
+        #linear_velocity = self.compute_control_command(self.x, self.get_markers)
+
+        # Calculating errors (x_desired - x_measured)
+        presErr = self.get_markers()[0][0] - (linear_velocity * dt)
+        kdErr = (presErr - self.prevErr)/dt
+
+        # Calculating the Proportional and Derivative Controls
+        p = self.Kp * presErr
+        d = self.Kd * kdErr
+
+        # Calculating the full PD controller
+        u = p + d
+        
+        # Updating the error for each time step
+        self.prevErr = presErr          
+    
+        
+        x_delta = math.fabs(state.position[0] - state_desired.position[0])
+        
+        y_delta = math.fabs(state.position[1] - state_desired.position[1])
+        
+        if ( (x_delta < self.threshold[0]) and (y_delta < self.threshold[1])):
+            self.marker_index = self.marker_index + 1
+
         self.visualizeState()
         
-        return np.ones((2,1)) * 0.1, 0
+        return linear_velocity, 0
 
 
     def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
@@ -368,3 +399,115 @@ class Pose2D:
         return Pose2D(np.dot(self.rotation, other.rotation), np.dot(self.rotation, other.translation) + self.translation)
 
 
+'''
+
+class UserCode: 
+
+    def init(self): 
+        #pass #get_markers #TODO: Play with the noise matrices
+        self.idx = 0
+
+        Kp_xy = 0.5
+        Kp_z = 0.1 # 1
+        Kd_xy = 0  # 1
+        Kd_z = 0
+
+        self.Kp = np.array([[Kp_xy, Kp_xy, Kp_z]]).T
+        self.Kd = np.array([[Kd_xy, Kd_xy, Kd_z]]).T
+
+
+        #process noise
+        pos_noise_std = 0.005
+        yaw_noise_std = 0.005
+        self.Q = np.array([
+            [pos_noise_std*pos_noise_std,0,0],
+            [0,pos_noise_std*pos_noise_std,0],
+            [0,0,yaw_noise_std*yaw_noise_std]
+        ]) 
+
+        #measurement noise
+        z_pos_noise_std = 0.005
+        z_yaw_noise_std = 0.03
+        self.R = np.array([
+            [z_pos_noise_std*z_pos_noise_std,0,0],
+            [0,z_pos_noise_std*z_pos_noise_std,0],
+            [0,0,z_yaw_noise_std*z_yaw_noise_std]
+        ])
+
+        # state vector [x, y, yaw] in world coordinates
+        self.x = np.zeros((3,1)) 
+
+        # 3x3 state covariance matrix
+        self.sigma = 0.01 * np.identity(3)
+
+    def get_markers(self):
+        '''
+        '''
+        place up to 30 markers in the world
+        '''
+        '''
+        markers = [
+             [1.5, 0.5], # marker at world position x = 0, y = 0
+             [3, 0.5],      # [+UP, +LEFT]
+             [4.5, 0.5],
+             [3.5, 2],
+             [1, 4],        # [1.5, 3.5]
+             [3, 3.5],
+             [4.4, 3.5],
+             [4, 5.5],
+             [5.5, 5.5],
+             [7, 5.5],
+             [4, 7],
+             [4, 8.5],
+             [5.5, 8.5],
+             [7, 8.5],
+             [6.5, 11],
+             [8, 11],
+             [9.5, 9.5],
+             [9.5, 11],
+             [9.5, 12.5]
+        ]
+
+        #     [2, 0]  # marker at world position x = 2, y = 0
+        #]
+
+        #TODO: Add your markers where needed
+
+        return markers
+
+
+    def state_callback(self, t, dt, linear_velocity, yaw_velocity):
+        '''
+        '''
+        called when a new odometry measurement arrives approx. 200Hz
+
+        :param t - simulation time
+        :param dt - time difference this last invocation
+        :param linear_velocity - x and y velocity in local quadrotor coordinate frame (independet of roll and pitch)
+        :param yaw_velocity - velocity around quadrotor z axis (independet of roll and pitch)
+        '''
+        '''
+        self.x = self.predictState(dt, self.x, linear_velocity, yaw_velocity)
+        F = self.calculatePredictStateJacobian(dt, self.x, linear_velocity, yaw_velocity)
+        self.sigma = self.predictCovariance(self.sigma, F, self.Q);
+
+        vel = np.array([[linear_velocity[0], linear_velocity[1], yaw_velocity]]).T
+        cvel = np.array([[0], [0], [0]])
+
+        delta_x = self.x[0] - self.get_markers()[self.idx][0]
+        delta_y = self.x[1] - self.get_markers()[self.idx][1]
+        d = math.sqrt(delta_x*delta_x + delta_y*delta_y)
+
+        if d < 0.3:
+            self.idx = self.idx + 1
+        mkrP = self.get_markers()[self.idx]
+
+     yawDesired = 0
+        mkr = np.array([[mkrP[0], mkrP[1], yawDesired]]).T
+        u = self.Kp * (mkr - self.x) + self.Kd * (cvel - vel)
+        self.visualizeState()
+        upos = np.array([[u[0], u[1]]]).T
+
+        return upos, u[2]
+
+'''
