@@ -1,0 +1,20 @@
+Checklist of files
+
+DONE:
+
+1. setTorq.m
+2. setTorqSix.m
+3. setSteer.m
+4. constVar.m
+5. setSteerSix.m
+6. setReset.m
+7. setStop.m
+8. stop.m
+9. testFile.m
+10. sendCmmd.m
+
+
+
+
+
+
