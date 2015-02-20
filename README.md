@@ -1,7 +1,7 @@
 AutonomousNavigationAlgorithms
 ==============================
 
-This repo consists of algorithms developed for computer vision and autonomous navigation using Python and simulated on a WebGL simulator using the skulpt Python to JavaScript interpreter.
+This repo consists of algorithms developed for the computer vision and autonomous navigation class called Autonomous Flying Robots by TUMx in 2014 (TU Munich's edX course) using Python and simulated on a WebGL simulator using the skulpt Python to JavaScript interpreter.
 
 These files are now completed and have been tested.
 
